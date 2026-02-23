@@ -46,3 +46,6 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated files
+spec/mist.resolved.json
