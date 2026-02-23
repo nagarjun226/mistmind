@@ -31,7 +31,7 @@ dependencies = [
 "Source" = "https://github.com/cheenu1092-oss/mistmind"
 
 [project.scripts]
-mistmind = "mistmind.__main__:main"
+mistmind = "mistmind.__main__:main_sync"
 
 [project.optional-dependencies]
 dev = [

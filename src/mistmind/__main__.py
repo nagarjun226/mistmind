@@ -135,10 +135,10 @@ async def main():
         uvicorn.run(app, host=args.host, port=args.port)
 
 
-def entry_point():
+def main_sync():
     """Synchronous entry point for console script"""
     asyncio.run(main())
 
 
 if __name__ == "__main__":
-    entry_point()
+    main_sync()
