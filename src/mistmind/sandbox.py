@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import tempfile
 import time
 from collections import deque
@@ -12,10 +13,40 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# Maximum chars to log for stdout/stderr (security: prevent data leakage)
+MAX_LOG_CHARS = 200
+
 
 def _js_safe_string(value: str) -> str:
     """Safely encode a string for embedding in JavaScript source code."""
     return json.dumps(value)
+
+
+def _truncate_for_log(text: str, max_chars: int = MAX_LOG_CHARS) -> str:
+    """Truncate text for logging to prevent sensitive data leakage."""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"... [truncated, {len(text)} total chars]"
+
+
+def _scrub_token(text: str, token: str) -> str:
+    """Remove API token from text to prevent leakage in errors/logs."""
+    if not token:
+        return text
+    return text.replace(token, "[REDACTED]")
+
+
+def _scrub_dict(d: Any, token: str) -> Any:
+    """Recursively scrub token from all string values in a dict/list."""
+    if not token:
+        return d
+    if isinstance(d, str):
+        return _scrub_token(d, token)
+    if isinstance(d, dict):
+        return {k: _scrub_dict(v, token) for k, v in d.items()}
+    if isinstance(d, list):
+        return [_scrub_dict(item, token) for item in d]
+    return d
 
 
 # Valid API mode → allowed HTTP methods mapping
@@ -111,8 +142,17 @@ class DenoSandbox:
         self,
         js_code: str,
         args: list[str],
+        stdin_data: bytes = None,
+        token_to_scrub: str = None,
     ) -> Dict[str, Any]:
-        """Run JavaScript code in Deno with specified arguments."""
+        """Run JavaScript code in Deno with specified arguments.
+        
+        Args:
+            js_code: JavaScript code to execute
+            args: Deno command line arguments
+            stdin_data: Optional data to pipe to stdin (for secure token passing)
+            token_to_scrub: Optional token to scrub from all output (security)
+        """
         # Check rate limit
         rate_error = self._check_rate_limit()
         if rate_error:
@@ -120,45 +160,66 @@ class DenoSandbox:
         
         # Acquire concurrency semaphore
         async with self._semaphore:
-            return await self._run_deno_inner(js_code, args)
+            return await self._run_deno_inner(js_code, args, stdin_data, token_to_scrub)
 
     async def _run_deno_inner(
         self,
         js_code: str,
         args: list[str],
+        stdin_data: bytes = None,
+        token_to_scrub: str = None,
     ) -> Dict[str, Any]:
         """Inner Deno execution (after rate limit and concurrency checks)."""
-        # Create temp file for JS code
+        # Create temp file for JS code with secure permissions
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".js",
             delete=False,
             dir="/tmp",
         ) as tmp:
-            tmp.write(js_code)
             tmp_path = tmp.name
         
+        # Set secure permissions BEFORE writing content (0o600 = owner read/write only)
+        os.chmod(tmp_path, 0o600)
+        
+        # Now write the content
+        with open(tmp_path, "w") as f:
+            f.write(js_code)
+        
         try:
-            # Build Deno command
-            cmd = [self.deno_path, "run"] + args + [tmp_path]
+            # Build Deno command with --no-prompt to prevent interactive prompts
+            cmd = [self.deno_path, "run", "--no-prompt"] + args + [tmp_path]
             
             logger.debug(f"Running Deno: {' '.join(cmd)}")
             
-            # Execute Deno
+            # Execute Deno with stdin pipe if we have data to send
             process = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.PIPE if stdin_data else None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             
+            pid = process.pid
+            
             # Wait with timeout
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
+                    process.communicate(input=stdin_data),
                     timeout=self.timeout,
                 )
             except asyncio.TimeoutError:
+                # SIGTERM first
                 process.kill()
+                # Wait briefly for graceful termination
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    # SIGKILL as fallback (cannot be caught)
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except (ProcessLookupError, OSError):
+                        pass  # Process already dead
                 await process.wait()
                 return {
                     "error": f"Execution timed out after {self.timeout} seconds",
@@ -169,9 +230,14 @@ class DenoSandbox:
             stdout_text = stdout.decode("utf-8")
             stderr_text = stderr.decode("utf-8")
             
-            # Log stderr if present
+            # Scrub token from output BEFORE any logging or processing
+            if token_to_scrub:
+                stdout_text = _scrub_token(stdout_text, token_to_scrub)
+                stderr_text = _scrub_token(stderr_text, token_to_scrub)
+            
+            # Log stderr if present (truncated for security)
             if stderr_text:
-                logger.debug(f"Deno stderr: {stderr_text}")
+                logger.debug(f"Deno stderr: {_truncate_for_log(stderr_text)}")
             
             # Enforce output size limit to prevent context flooding
             if len(stdout_text) > self.MAX_OUTPUT_BYTES:
@@ -199,24 +265,35 @@ class DenoSandbox:
             
             if json_text is None:
                 logger.error(f"No valid JSON found in Deno output")
-                logger.error(f"stdout: {stdout_text}")
-                return {
+                logger.error(f"stdout: {_truncate_for_log(stdout_text)}")
+                result = {
                     "error": "No valid JSON in output",
                     "stderr": stderr_text,
                     "stdout": stdout_text[:500],
                 }
+                # Scrub result dict
+                if token_to_scrub:
+                    result = _scrub_dict(result, token_to_scrub)
+                return result
             
             try:
                 result = json.loads(json_text)
+                # Scrub token from result dict
+                if token_to_scrub:
+                    result = _scrub_dict(result, token_to_scrub)
                 return result
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse Deno output as JSON: {e}")
-                logger.error(f"stdout: {stdout_text}")
-                return {
+                logger.error(f"stdout: {_truncate_for_log(stdout_text)}")
+                result = {
                     "error": f"Invalid JSON output: {str(e)}",
                     "stderr": stderr_text,
                     "stdout": stdout_text[:500],
                 }
+                # Scrub result dict
+                if token_to_scrub:
+                    result = _scrub_dict(result, token_to_scrub)
+                return result
         
         finally:
             # Clean up temp file
@@ -288,11 +365,14 @@ try {{
             Result of the function execution or error dict
         """
         # Build JavaScript wrapper with mist client
-        # Use json.dumps to safely escape token/host (prevents JS injection)
+        # SECURITY: Token is passed via stdin, NOT embedded in source code
+        # This prevents the token from appearing in temp files on disk
         safe_host = _js_safe_string(api_host)
-        safe_token = _js_safe_string(api_token)
         js_methods = json.dumps(self.allowed_methods)
-        js_template = f'''// Freeze output function so user code can't override it
+        js_template = f'''// SECURITY: Read token from stdin (never stored on disk)
+const _token = await new Response(Deno.stdin.readable).text();
+
+// Freeze output function so user code can't override it
 const __output = console.log.bind(console);
 
 const __allowedMethods = Object.freeze({js_methods});
@@ -303,7 +383,6 @@ const mist = Object.freeze({{
 
   async request({{method = "GET", path, body, params}}) {{
     const _host = {safe_host};
-    const _token = {safe_token};
     
     // Enforce allowed HTTP methods (server-side policy)
     const upperMethod = method.toUpperCase();
@@ -368,4 +447,10 @@ try {{
             "--deny-run",
         ]
         
-        return await self._run_deno(js_template, deno_args)
+        # Pass token via stdin and scrub from all output
+        return await self._run_deno(
+            js_template,
+            deno_args,
+            stdin_data=api_token.encode("utf-8"),
+            token_to_scrub=api_token,
+        )
