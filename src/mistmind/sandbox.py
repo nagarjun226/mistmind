@@ -5,8 +5,10 @@ import json
 import logging
 import os
 import tempfile
+import time
+from collections import deque
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +16,14 @@ logger = logging.getLogger(__name__)
 def _js_safe_string(value: str) -> str:
     """Safely encode a string for embedding in JavaScript source code."""
     return json.dumps(value)
+
+
+# Valid API mode → allowed HTTP methods mapping
+API_MODE_METHODS = {
+    "readonly": ["GET"],
+    "readwrite": ["GET", "POST", "PUT", "PATCH"],
+    "all": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+}
 
 
 class DenoSandbox:
@@ -38,14 +48,64 @@ class DenoSandbox:
         "api.ac6.mist.com",
     ]
 
-    def __init__(self, deno_path: str, timeout: int = 30):
-        """Initialize sandbox with path to Deno binary and timeout."""
+    def __init__(
+        self,
+        deno_path: str,
+        timeout: int = 30,
+        api_mode: str = "readonly",
+        rate_limit: int = 30,
+        max_concurrent: int = 5,
+    ):
+        """Initialize sandbox with path to Deno binary and security settings.
+        
+        Args:
+            deno_path: Path to Deno binary
+            timeout: Max execution time in seconds
+            api_mode: "readonly" (GET), "readwrite" (GET+POST+PUT+PATCH), "all" (includes DELETE)
+            rate_limit: Max executions per minute (0 = unlimited)
+            max_concurrent: Max parallel Deno processes
+        """
         self.deno_path = deno_path
         self.timeout = timeout
+        self.api_mode = api_mode
+        self.allowed_methods = API_MODE_METHODS.get(api_mode, API_MODE_METHODS["readonly"])
+        self.rate_limit = rate_limit
+        self.max_concurrent = max_concurrent
+        
+        # Rate limiting state
+        self._request_times: deque = deque()
+        # Concurrency semaphore
+        self._semaphore = asyncio.Semaphore(max_concurrent)
         
         # Verify Deno exists
         if not Path(deno_path).exists():
             raise FileNotFoundError(f"Deno not found at {deno_path}")
+        
+        # Validate api_mode
+        if api_mode not in API_MODE_METHODS:
+            raise ValueError(f"Invalid api_mode: {api_mode}. Must be one of: {list(API_MODE_METHODS.keys())}")
+        
+        logger.info(f"Sandbox initialized: api_mode={api_mode}, methods={self.allowed_methods}, "
+                     f"rate_limit={rate_limit}/min, max_concurrent={max_concurrent}")
+    
+    def _check_rate_limit(self) -> Optional[str]:
+        """Check if rate limit is exceeded. Returns error message or None."""
+        if self.rate_limit <= 0:
+            return None
+        
+        now = time.monotonic()
+        # Remove entries older than 60 seconds
+        while self._request_times and (now - self._request_times[0]) > 60:
+            self._request_times.popleft()
+        
+        if len(self._request_times) >= self.rate_limit:
+            oldest = self._request_times[0]
+            wait_seconds = 60 - (now - oldest)
+            return (f"Rate limit exceeded ({self.rate_limit} requests/minute). "
+                    f"Try again in {wait_seconds:.0f} seconds.")
+        
+        self._request_times.append(now)
+        return None
 
     async def _run_deno(
         self,
@@ -53,6 +113,21 @@ class DenoSandbox:
         args: list[str],
     ) -> Dict[str, Any]:
         """Run JavaScript code in Deno with specified arguments."""
+        # Check rate limit
+        rate_error = self._check_rate_limit()
+        if rate_error:
+            return {"error": rate_error}
+        
+        # Acquire concurrency semaphore
+        async with self._semaphore:
+            return await self._run_deno_inner(js_code, args)
+
+    async def _run_deno_inner(
+        self,
+        js_code: str,
+        args: list[str],
+    ) -> Dict[str, Any]:
+        """Inner Deno execution (after rate limit and concurrency checks)."""
         # Create temp file for JS code
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -216,13 +291,30 @@ try {{
         # Use json.dumps to safely escape token/host (prevents JS injection)
         safe_host = _js_safe_string(api_host)
         safe_token = _js_safe_string(api_token)
+        js_methods = json.dumps(self.allowed_methods)
         js_template = f'''// Freeze output function so user code can't override it
 const __output = console.log.bind(console);
 
+const __allowedMethods = Object.freeze({js_methods});
+
 const mist = Object.freeze({{
+  // Allowed HTTP methods (configured server-side, cannot be bypassed)
+  get allowedMethods() {{ return __allowedMethods; }},
+
   async request({{method = "GET", path, body, params}}) {{
     const _host = {safe_host};
     const _token = {safe_token};
+    
+    // Enforce allowed HTTP methods (server-side policy)
+    const upperMethod = method.toUpperCase();
+    if (!__allowedMethods.includes(upperMethod)) {{
+      throw new Error(
+        `Method ${{upperMethod}} is not allowed. Server is in "${{'{self.api_mode}'}}" mode. ` +
+        `Allowed methods: ${{__allowedMethods.join(", ")}}. ` +
+        `Contact the admin to change MISTMIND_API_MODE if write access is needed.`
+      );
+    }}
+    
     const url = new URL(`https://${{_host}}${{path}}`);
     
     if (params) {{
@@ -234,14 +326,14 @@ const mist = Object.freeze({{
     }}
     
     const opts = {{
-      method,
+      method: upperMethod,
       headers: {{
         'Authorization': `Token ${{_token}}`,
         'Content-Type': 'application/json',
       }},
     }};
     
-    if (body && method !== 'GET') {{
+    if (body && upperMethod !== 'GET') {{
       opts.body = JSON.stringify(body);
     }}
     

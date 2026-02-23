@@ -32,6 +32,23 @@ class ServerConfig(BaseSettings):
         default=None,
         description="Path to Deno binary",
     )
+    # Safety: restrict which HTTP methods the execute tool can use
+    # Default: read-only (GET only). Set to "read-write" or "all" for full access.
+    # Options: "readonly" (GET only), "readwrite" (GET+POST+PUT+PATCH), "all" (includes DELETE)
+    mistmind_api_mode: str = Field(
+        default="readonly",
+        description="API access mode: readonly (GET), readwrite (GET+POST+PUT+PATCH), all (includes DELETE)",
+    )
+    # Rate limiting: max sandbox executions per minute (0 = unlimited)
+    mistmind_rate_limit: int = Field(
+        default=30,
+        description="Max sandbox executions per minute (0 = unlimited)",
+    )
+    # Max concurrent sandbox processes
+    mistmind_max_concurrent: int = Field(
+        default=5,
+        description="Max concurrent Deno sandbox processes",
+    )
 
     def __init__(self, **kwargs):
         """Initialize config and auto-detect Deno path if not provided."""

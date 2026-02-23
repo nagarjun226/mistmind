@@ -25,6 +25,9 @@ class MistMindServer:
         self.sandbox = DenoSandbox(
             deno_path=config.deno_path,
             timeout=30,
+            api_mode=config.mistmind_api_mode,
+            rate_limit=config.mistmind_rate_limit,
+            max_concurrent=config.mistmind_max_concurrent,
         )
         self.server = Server("mistmind")
         
