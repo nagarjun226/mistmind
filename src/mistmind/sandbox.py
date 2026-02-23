@@ -19,6 +19,9 @@ def _js_safe_string(value: str) -> str:
 class DenoSandbox:
     """Secure sandbox for executing JavaScript code in Deno."""
 
+    # Maximum output size (1MB) to prevent context flooding
+    MAX_OUTPUT_BYTES = 1 * 1024 * 1024
+
     # All Mist API hosts that should be allowed for execute
     MIST_HOSTS = [
         "api.mist.com",
@@ -95,9 +98,41 @@ class DenoSandbox:
             if stderr_text:
                 logger.debug(f"Deno stderr: {stderr_text}")
             
-            # Parse stdout as JSON
+            # Enforce output size limit to prevent context flooding
+            if len(stdout_text) > self.MAX_OUTPUT_BYTES:
+                return {
+                    "error": f"Output too large ({len(stdout_text)} bytes, max {self.MAX_OUTPUT_BYTES}). "
+                             "Filter or summarize results in your code before returning.",
+                    "stderr": stderr_text,
+                }
+            
+            # Parse the LAST line of stdout as JSON (ignore any prior console.log output)
+            # The wrapper template always outputs the result as the final console.log
+            stdout_lines = stdout_text.strip().splitlines()
+            
+            # Try to find valid JSON starting from the last line, working backwards
+            # to handle pretty-printed JSON (multi-line)
+            json_text = None
+            for i in range(len(stdout_lines)):
+                candidate = "\n".join(stdout_lines[i:])
+                try:
+                    json.loads(candidate)
+                    json_text = candidate
+                    break
+                except json.JSONDecodeError:
+                    continue
+            
+            if json_text is None:
+                logger.error(f"No valid JSON found in Deno output")
+                logger.error(f"stdout: {stdout_text}")
+                return {
+                    "error": "No valid JSON in output",
+                    "stderr": stderr_text,
+                    "stdout": stdout_text[:500],
+                }
+            
             try:
-                result = json.loads(stdout_text)
+                result = json.loads(json_text)
                 return result
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse Deno output as JSON: {e}")
@@ -105,7 +140,7 @@ class DenoSandbox:
                 return {
                     "error": f"Invalid JSON output: {str(e)}",
                     "stderr": stderr_text,
-                    "stdout": stdout_text,
+                    "stdout": stdout_text[:500],
                 }
         
         finally:
@@ -137,13 +172,16 @@ class DenoSandbox:
         spec_url = f"file://{spec_file}"
         js_template = f'''import spec from "{spec_url}" with {{ type: "json" }};
 
+// Freeze output function so user code can't override it
+const __output = console.log.bind(console);
+
 const fn = {code};
 
 try {{
   const result = await fn();
-  console.log(JSON.stringify(result, null, 2));
+  __output(JSON.stringify(result, null, 2));
 }} catch(e) {{
-  console.log(JSON.stringify({{error: e.message, stack: e.stack}}));
+  __output(JSON.stringify({{error: e.message, stack: e.stack}}));
 }}
 '''
         
@@ -178,12 +216,14 @@ try {{
         # Use json.dumps to safely escape token/host (prevents JS injection)
         safe_host = _js_safe_string(api_host)
         safe_token = _js_safe_string(api_token)
-        js_template = f'''const mist = {{
-  _host: {safe_host},
-  _token: {safe_token},
-  
+        js_template = f'''// Freeze output function so user code can't override it
+const __output = console.log.bind(console);
+
+const mist = Object.freeze({{
   async request({{method = "GET", path, body, params}}) {{
-    const url = new URL(`https://${{this._host}}${{path}}`);
+    const _host = {safe_host};
+    const _token = {safe_token};
+    const url = new URL(`https://${{_host}}${{path}}`);
     
     if (params) {{
       Object.entries(params).forEach(([k, v]) => {{
@@ -196,7 +236,7 @@ try {{
     const opts = {{
       method,
       headers: {{
-        'Authorization': `Token ${{this._token}}`,
+        'Authorization': `Token ${{_token}}`,
         'Content-Type': 'application/json',
       }},
     }};
@@ -214,15 +254,15 @@ try {{
     
     return data;
   }}
-}};
+}});
 
 const fn = {code};
 
 try {{
   const result = await fn();
-  console.log(JSON.stringify(result, null, 2));
+  __output(JSON.stringify(result, null, 2));
 }} catch(e) {{
-  console.log(JSON.stringify({{error: e.message, stack: e.stack}}));
+  __output(JSON.stringify({{error: e.message, stack: e.stack}}));
 }}
 '''
         
