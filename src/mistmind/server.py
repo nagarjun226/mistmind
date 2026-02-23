@@ -1,5 +1,6 @@
 """MCP server implementation with search and execute tools."""
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -135,7 +136,6 @@ class MistMindServer:
         )
         
         # Format result as text
-        import json
         result_text = json.dumps(result, indent=2)
         
         return [TextContent(type="text", text=result_text)]
@@ -155,7 +155,6 @@ class MistMindServer:
         )
         
         # Format result as text
-        import json
         result_text = json.dumps(result, indent=2)
         
         return [TextContent(type="text", text=result_text)]

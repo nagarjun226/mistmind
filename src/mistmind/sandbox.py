@@ -11,6 +11,11 @@ from typing import Any, Dict
 logger = logging.getLogger(__name__)
 
 
+def _js_safe_string(value: str) -> str:
+    """Safely encode a string for embedding in JavaScript source code."""
+    return json.dumps(value)
+
+
 class DenoSandbox:
     """Secure sandbox for executing JavaScript code in Deno."""
 
@@ -170,9 +175,12 @@ try {{
             Result of the function execution or error dict
         """
         # Build JavaScript wrapper with mist client
+        # Use json.dumps to safely escape token/host (prevents JS injection)
+        safe_host = _js_safe_string(api_host)
+        safe_token = _js_safe_string(api_token)
         js_template = f'''const mist = {{
-  _host: "{api_host}",
-  _token: "{api_token}",
+  _host: {safe_host},
+  _token: {safe_token},
   
   async request({{method = "GET", path, body, params}}) {{
     const url = new URL(`https://${{this._host}}${{path}}`);
