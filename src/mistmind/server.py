@@ -11,6 +11,7 @@ from mcp.types import TextContent, Tool
 
 from .config import ServerConfig
 from .sandbox import DenoSandbox
+from .spec_indexer import generate_index_from_file
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,11 @@ class MistMindServer:
                 f"spec/mist.openapi.json spec/mist.resolved.json"
             )
         
+        # Generate dynamic index from spec
+        logger.info("Generating spec index...")
+        self.spec_index = generate_index_from_file(str(self.spec_path))
+        logger.info(f"Spec index generated (~{len(self.spec_index) // 4} tokens)")
+        
         self._register_handlers()
 
     def _register_handlers(self):
@@ -50,12 +56,7 @@ class MistMindServer:
             return [
                 Tool(
                     name="search",
-                    description=(
-                        "Search the Juniper Mist OpenAPI spec. Write a JavaScript async arrow "
-                        "function that receives `spec` (the full OpenAPI 3.1 spec with paths, "
-                        "schemas, etc). All $refs are pre-resolved inline. Use spec.paths to "
-                        "find endpoints, spec.components.schemas for data models."
-                    ),
+                    description=self.spec_index,
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -77,10 +78,11 @@ class MistMindServer:
                 Tool(
                     name="execute",
                     description=(
-                        "Execute JavaScript code against the Juniper Mist API. Write a JavaScript "
-                        "async arrow function. Use `mist.request({method, path, body, params})` to "
-                        "make authenticated API calls. Chain multiple calls, filter results, handle "
-                        "pagination."
+                        "Execute JS against the Mist API. Use mist.request({method, path, body, params}).\n"
+                        "method defaults to GET. Chain multiple calls, filter/transform results in JS.\n"
+                        "mist.allowedMethods shows permitted HTTP methods.\n"
+                        "For paginated results: check if total > results.length, loop with page/start params.\n"
+                        "For write ops: return a preview first, execute write only after user confirms."
                     ),
                     inputSchema={
                         "type": "object",

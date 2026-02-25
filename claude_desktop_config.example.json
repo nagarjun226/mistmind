@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "mistmind": {
+      "command": "python",
+      "args": ["-m", "mistmind"],
+      "env": {
+        "MIST_APITOKEN": "your-mist-api-token-here",
+        "MIST_HOST": "api.mist.com",
+        "MISTMIND_API_MODE": "readonly",
+        "MISTMIND_RATE_LIMIT": "30",
+        "MISTMIND_MAX_CONCURRENT": "5"
+      }
+    }
+  },
+  "_comment": "Add this to ~/Library/Application Support/Claude/claude_desktop_config.json on macOS or %APPDATA%/Claude/claude_desktop_config.json on Windows. Replace 'your-mist-api-token-here' with your actual Mist API token. Set MISTMIND_API_MODE to 'full' to allow write operations (use with caution)."
+}
