@@ -49,6 +49,11 @@ class ServerConfig(BaseSettings):
         default=5,
         description="Max concurrent Deno sandbox processes",
     )
+    # BUG 8: Make spec path configurable
+    mistmind_spec_path: Optional[str] = Field(
+        default=None,
+        description="Path to resolved OpenAPI spec JSON file",
+    )
 
     def __init__(self, **kwargs):
         """Initialize config and auto-detect Deno path if not provided."""

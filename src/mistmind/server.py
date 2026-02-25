@@ -118,10 +118,14 @@ class MistMindServer:
                     ]
             except Exception as e:
                 logger.error(f"Tool call error: {e}", exc_info=True)
+                error_msg = str(e)
+                # BUG 3 FIX: Scrub token from exception messages
+                if hasattr(self, 'config') and self.config.mist_apitoken:
+                    error_msg = error_msg.replace(self.config.mist_apitoken, "[REDACTED]")
                 return [
                     TextContent(
                         type="text",
-                        text=f"Error: {str(e)}",
+                        text=f"Error: {error_msg}",
                     )
                 ]
 

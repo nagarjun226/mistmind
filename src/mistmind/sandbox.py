@@ -170,7 +170,8 @@ class DenoSandbox:
         token_to_scrub: str = None,
     ) -> Dict[str, Any]:
         """Inner Deno execution (after rate limit and concurrency checks)."""
-        # Create temp file for JS code with secure permissions
+        # BUG 2 FIX: Create temp file with secure permissions and write atomically
+        # Write content in the same block to prevent TOCTOU race
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".js",
@@ -178,13 +179,11 @@ class DenoSandbox:
             dir="/tmp",
         ) as tmp:
             tmp_path = tmp.name
-        
-        # Set secure permissions BEFORE writing content (0o600 = owner read/write only)
-        os.chmod(tmp_path, 0o600)
-        
-        # Now write the content
-        with open(tmp_path, "w") as f:
-            f.write(js_code)
+            # Set secure permissions BEFORE writing content (0o600 = owner read/write only)
+            os.chmod(tmp_path, 0o600)
+            # Write content in the same block (no TOCTOU race)
+            tmp.write(js_code)
+            tmp.flush()
         
         try:
             # Build Deno command with --no-prompt to prevent interactive prompts
@@ -364,69 +363,87 @@ try {{
         Returns:
             Result of the function execution or error dict
         """
+        # BUG 5: Validate token (prevent header injection via \r\n)
+        if not api_token or not api_token.strip():
+            return {"error": "API token is empty"}
+        if any(c in api_token for c in '\r\n\x00'):
+            return {"error": "API token contains invalid characters"}
+        
         # Build JavaScript wrapper with mist client
         # SECURITY: Token is passed via stdin, NOT embedded in source code
         # This prevents the token from appearing in temp files on disk
         safe_host = _js_safe_string(api_host)
         js_methods = json.dumps(self.allowed_methods)
-        js_template = f'''// SECURITY: Read token from stdin (never stored on disk)
-const _token = await new Response(Deno.stdin.readable).text();
-
-// Freeze output function so user code can't override it
+        # BUG 1 & 4: IIFE pattern ensures _token is in closure scope, unreachable from user code
+        # Also wraps stdin read in try/catch for proper error handling
+        js_template = f'''// Freeze output function so user code can't override it
 const __output = console.log.bind(console);
 
-const __allowedMethods = Object.freeze({js_methods});
-
-const mist = Object.freeze({{
-  // Allowed HTTP methods (configured server-side, cannot be bypassed)
-  get allowedMethods() {{ return __allowedMethods; }},
-
-  async request({{method = "GET", path, body, params}}) {{
-    const _host = {safe_host};
-    
-    // Enforce allowed HTTP methods (server-side policy)
-    const upperMethod = method.toUpperCase();
-    if (!__allowedMethods.includes(upperMethod)) {{
-      throw new Error(
-        `Method ${{upperMethod}} is not allowed. Server is in "${{'{self.api_mode}'}}" mode. ` +
-        `Allowed methods: ${{__allowedMethods.join(", ")}}. ` +
-        `Contact the admin to change MISTMIND_API_MODE if write access is needed.`
-      );
-    }}
-    
-    const url = new URL(`https://${{_host}}${{path}}`);
-    
-    if (params) {{
-      Object.entries(params).forEach(([k, v]) => {{
-        if (v !== undefined && v !== null) {{
-          url.searchParams.set(k, String(v));
-        }}
-      }});
-    }}
-    
-    const opts = {{
-      method: upperMethod,
-      headers: {{
-        'Authorization': `Token ${{_token}}`,
-        'Content-Type': 'application/json',
-      }},
-    }};
-    
-    if (body && upperMethod !== 'GET') {{
-      opts.body = JSON.stringify(body);
-    }}
-    
-    const resp = await fetch(url.toString(), opts);
-    const data = await resp.json();
-    
-    if (!resp.ok) {{
-      throw new Error(`Mist API error ${{resp.status}}: ${{JSON.stringify(data)}}`);
-    }}
-    
-    return data;
+// SECURITY: Token read and mist object created inside IIFE
+// _token only exists in closure scope, inaccessible to user code
+const mist = await (async () => {{
+  let _token;
+  try {{
+    _token = await new Response(Deno.stdin.readable).text();
+  }} catch(e) {{
+    __output(JSON.stringify({{error: "Failed to read authentication token: " + e.message}}));
+    Deno.exit(1);
   }}
-}});
+  
+  const __allowedMethods = Object.freeze({js_methods});
+  
+  return Object.freeze({{
+    // Allowed HTTP methods (configured server-side, cannot be bypassed)
+    get allowedMethods() {{ return __allowedMethods; }},
 
+    async request({{method = "GET", path, body, params}}) {{
+      const _host = {safe_host};
+      
+      // Enforce allowed HTTP methods (server-side policy)
+      const upperMethod = method.toUpperCase();
+      if (!__allowedMethods.includes(upperMethod)) {{
+        throw new Error(
+          `Method ${{upperMethod}} is not allowed. Server is in "${{'{self.api_mode}'}}" mode. ` +
+          `Allowed methods: ${{__allowedMethods.join(", ")}}. ` +
+          `Contact the admin to change MISTMIND_API_MODE if write access is needed.`
+        );
+      }}
+      
+      const url = new URL(`https://${{_host}}${{path}}`);
+      
+      if (params) {{
+        Object.entries(params).forEach(([k, v]) => {{
+          if (v !== undefined && v !== null) {{
+            url.searchParams.set(k, String(v));
+          }}
+        }});
+      }}
+      
+      const opts = {{
+        method: upperMethod,
+        headers: {{
+          'Authorization': `Token ${{_token}}`,
+          'Content-Type': 'application/json',
+        }},
+      }};
+      
+      if (body && upperMethod !== 'GET') {{
+        opts.body = JSON.stringify(body);
+      }}
+      
+      const resp = await fetch(url.toString(), opts);
+      const data = await resp.json();
+      
+      if (!resp.ok) {{
+        throw new Error(`Mist API error ${{resp.status}}: ${{JSON.stringify(data)}}`);
+      }}
+      
+      return data;
+    }}
+  }});
+}})();
+
+// _token does NOT exist here - it's inside the IIFE closure
 const fn = {code};
 
 try {{

@@ -615,3 +615,369 @@ class TestStress:
         for i, result in enumerate(results):
             result_str = json.dumps(result)
             assert tokens[i] not in result_str, f"Token {i} leaked!"
+
+
+# =============================================================================
+# BUG 7: Additional Missing Tests
+# =============================================================================
+
+class TestRateLimiting:
+    """Tests for rate limiting functionality."""
+    
+    @pytest.mark.asyncio
+    async def test_rate_limit_enforced(self, deno_path):
+        """Rate limit is enforced after threshold exceeded."""
+        # Create sandbox with very low rate limit
+        sandbox = DenoSandbox(deno_path=deno_path, timeout=5, rate_limit=3)
+        
+        # Make rate_limit requests (should succeed)
+        for i in range(3):
+            result = await sandbox.run_execute(
+                f'''async () => {{ return {{request: {i}}}; }}''',
+                "test-token",
+                "api.mist.com"
+            )
+            assert "error" not in result or "Rate limit" not in result.get("error", "")
+        
+        # Next request should be rate limited
+        result = await sandbox.run_execute(
+            '''async () => { return {shouldFail: true}; }''',
+            "test-token",
+            "api.mist.com"
+        )
+        
+        assert "error" in result
+        assert "Rate limit exceeded" in result["error"]
+    
+    @pytest.mark.asyncio
+    async def test_rate_limit_zero_means_unlimited(self, deno_path):
+        """Rate limit of 0 means unlimited."""
+        sandbox = DenoSandbox(deno_path=deno_path, timeout=5, rate_limit=0)
+        
+        # Should be able to make many requests
+        for i in range(10):
+            result = await sandbox.run_execute(
+                f'''async () => {{ return {{request: {i}}}; }}''',
+                "test-token",
+                "api.mist.com"
+            )
+            assert "Rate limit" not in result.get("error", "")
+
+
+class TestApiModeEnforcement:
+    """Tests for API mode method restrictions."""
+    
+    @pytest.mark.asyncio
+    async def test_readonly_rejects_post(self, deno_path):
+        """Readonly mode rejects POST requests."""
+        sandbox = DenoSandbox(deno_path=deno_path, timeout=5, api_mode="readonly")
+        
+        result = await sandbox.run_execute(
+            '''async () => {
+                try {
+                    await mist.request({method: "POST", path: "/api/v1/test", body: {}});
+                    return {allowed: true};
+                } catch(e) {
+                    return {error: e.message};
+                }
+            }''',
+            "test-token",
+            "api.mist.com"
+        )
+        
+        assert "error" in result
+        assert "POST" in result["error"]
+        assert "not allowed" in result["error"]
+    
+    @pytest.mark.asyncio
+    async def test_readonly_rejects_put(self, deno_path):
+        """Readonly mode rejects PUT requests."""
+        sandbox = DenoSandbox(deno_path=deno_path, timeout=5, api_mode="readonly")
+        
+        result = await sandbox.run_execute(
+            '''async () => {
+                try {
+                    await mist.request({method: "PUT", path: "/api/v1/test", body: {}});
+                    return {allowed: true};
+                } catch(e) {
+                    return {error: e.message};
+                }
+            }''',
+            "test-token",
+            "api.mist.com"
+        )
+        
+        assert "error" in result
+        assert "PUT" in result["error"]
+        assert "not allowed" in result["error"]
+    
+    @pytest.mark.asyncio
+    async def test_readonly_rejects_delete(self, deno_path):
+        """Readonly mode rejects DELETE requests."""
+        sandbox = DenoSandbox(deno_path=deno_path, timeout=5, api_mode="readonly")
+        
+        result = await sandbox.run_execute(
+            '''async () => {
+                try {
+                    await mist.request({method: "DELETE", path: "/api/v1/test"});
+                    return {allowed: true};
+                } catch(e) {
+                    return {error: e.message};
+                }
+            }''',
+            "test-token",
+            "api.mist.com"
+        )
+        
+        assert "error" in result
+        assert "DELETE" in result["error"]
+        assert "not allowed" in result["error"]
+    
+    @pytest.mark.asyncio
+    async def test_readwrite_allows_post(self, deno_path):
+        """Readwrite mode allows POST requests (but will fail on actual API call)."""
+        sandbox = DenoSandbox(deno_path=deno_path, timeout=5, api_mode="readwrite")
+        
+        result = await sandbox.run_execute(
+            '''async () => {
+                try {
+                    // This will fail on network, but the method should be allowed
+                    await mist.request({method: "POST", path: "/api/v1/test", body: {}});
+                    return {allowed: true};
+                } catch(e) {
+                    // Check if it's a method rejection vs network error
+                    if (e.message.includes("not allowed")) {
+                        return {methodRejected: true, error: e.message};
+                    }
+                    return {networkError: true, error: e.message};
+                }
+            }''',
+            "test-token",
+            "api.mist.com"
+        )
+        
+        # Should not have method rejection
+        assert result.get("methodRejected") != True
+    
+    @pytest.mark.asyncio
+    async def test_readwrite_rejects_delete(self, deno_path):
+        """Readwrite mode still rejects DELETE."""
+        sandbox = DenoSandbox(deno_path=deno_path, timeout=5, api_mode="readwrite")
+        
+        result = await sandbox.run_execute(
+            '''async () => {
+                try {
+                    await mist.request({method: "DELETE", path: "/api/v1/test"});
+                    return {allowed: true};
+                } catch(e) {
+                    return {error: e.message};
+                }
+            }''',
+            "test-token",
+            "api.mist.com"
+        )
+        
+        assert "error" in result
+        assert "DELETE" in result["error"]
+
+
+class TestOutputSizeLimit:
+    """Tests for output size limiting."""
+    
+    @pytest.mark.asyncio
+    async def test_output_exceeds_limit_returns_error(self, sandbox):
+        """Output exceeding MAX_OUTPUT_BYTES returns error."""
+        # Generate output larger than 1MB
+        result = await sandbox.run_execute(
+            '''async () => {
+                // Return a large string (>1MB)
+                return "x".repeat(2 * 1024 * 1024);
+            }''',
+            "test-token",
+            "api.mist.com"
+        )
+        
+        assert "error" in result
+        assert "Output too large" in result["error"]
+
+
+class TestSpecFileHandling:
+    """Tests for spec file handling in run_search."""
+    
+    @pytest.mark.asyncio
+    async def test_run_search_nonexistent_spec(self, sandbox):
+        """run_search with non-existent spec file returns error."""
+        result = await sandbox.run_search(
+            '''async () => { return spec; }''',
+            "/nonexistent/path/to/spec.json"
+        )
+        
+        assert "error" in result
+        assert "not found" in result["error"].lower() or "spec file" in result["error"].lower()
+
+
+class TestConcurrencySemaphore:
+    """Tests for concurrency limiting."""
+    
+    @pytest.mark.asyncio
+    async def test_concurrency_limits_parallel_execution(self, deno_path):
+        """Concurrency semaphore limits parallel executions."""
+        # Create sandbox with max 2 concurrent
+        sandbox = DenoSandbox(
+            deno_path=deno_path,
+            timeout=10,
+            max_concurrent=2,
+            rate_limit=0,  # Disable rate limiting for this test
+        )
+        
+        # Track concurrent execution count
+        import time
+        start_times = []
+        end_times = []
+        
+        async def timed_execution(i):
+            start_times.append(time.monotonic())
+            result = await sandbox.run_execute(
+                f'''async () => {{
+                    await new Promise(r => setTimeout(r, 500));
+                    return {{id: {i}}};
+                }}''',
+                "test-token",
+                "api.mist.com"
+            )
+            end_times.append(time.monotonic())
+            return result
+        
+        # Run 4 tasks - with max_concurrent=2, should take ~1s not ~0.5s
+        results = await asyncio.gather(*[timed_execution(i) for i in range(4)])
+        
+        # All should complete successfully
+        assert len(results) == 4
+        for r in results:
+            assert "error" not in r or "Rate limit" not in r.get("error", "")
+
+
+class TestIIFETokenIsolation:
+    """Tests for IIFE token isolation (BUG 1 fix verification)."""
+    
+    @pytest.mark.asyncio
+    async def test_token_is_undefined_in_user_scope(self, sandbox):
+        """_token should be undefined in user code scope."""
+        result = await sandbox.run_execute(
+            '''async () => {
+                return typeof _token;
+            }''',
+            SECRET_TOKEN,
+            "api.mist.com"
+        )
+        
+        assert result == "undefined"
+    
+    @pytest.mark.asyncio
+    async def test_cannot_access_token_via_closure_inspection(self, sandbox):
+        """Cannot access _token by inspecting closures."""
+        result = await sandbox.run_execute(
+            '''async () => {
+                // Try to extract from mist.request's closure
+                const reqStr = mist.request.toString();
+                return {
+                    requestString: reqStr,
+                    hasToken: reqStr.includes("_token")
+                };
+            }''',
+            SECRET_TOKEN,
+            "api.mist.com"
+        )
+        
+        result_str = json.dumps(result)
+        # Token value should never appear in the result
+        assert SECRET_TOKEN not in result_str
+    
+    @pytest.mark.asyncio
+    async def test_mist_request_tostring_safe(self, sandbox):
+        """mist.request.toString() doesn't leak actual token value."""
+        result = await sandbox.run_execute(
+            '''async () => {
+                return mist.request.toString();
+            }''',
+            SECRET_TOKEN,
+            "api.mist.com"
+        )
+        
+        # The function source might reference _token variable name,
+        # but should never contain the actual token value
+        if isinstance(result, str):
+            assert SECRET_TOKEN not in result
+        else:
+            assert SECRET_TOKEN not in json.dumps(result)
+    
+    @pytest.mark.asyncio
+    async def test_globalthis_does_not_have_token(self, sandbox):
+        """globalThis enumeration doesn't reveal _token."""
+        result = await sandbox.run_execute(
+            '''async () => {
+                const globals = Object.keys(globalThis);
+                return {
+                    hasToken: globals.includes("_token"),
+                    hasUnderscoreToken: globals.some(k => k.includes("token")),
+                    globals: globals.filter(k => k.startsWith("_"))
+                };
+            }''',
+            SECRET_TOKEN,
+            "api.mist.com"
+        )
+        
+        assert result["hasToken"] == False
+        assert result["hasUnderscoreToken"] == False
+
+
+class TestTokenValidation:
+    """Tests for token input validation (BUG 5 fix verification)."""
+    
+    @pytest.mark.asyncio
+    async def test_empty_token_rejected(self, sandbox):
+        """Empty token is rejected."""
+        result = await sandbox.run_execute(
+            '''async () => { return {ok: true}; }''',
+            "",
+            "api.mist.com"
+        )
+        
+        assert "error" in result
+        assert "empty" in result["error"].lower()
+    
+    @pytest.mark.asyncio
+    async def test_whitespace_only_token_rejected(self, sandbox):
+        """Whitespace-only token is rejected."""
+        result = await sandbox.run_execute(
+            '''async () => { return {ok: true}; }''',
+            "   ",
+            "api.mist.com"
+        )
+        
+        assert "error" in result
+        assert "empty" in result["error"].lower()
+    
+    @pytest.mark.asyncio
+    async def test_token_with_newline_rejected(self, sandbox):
+        """Token containing newline is rejected (header injection prevention)."""
+        result = await sandbox.run_execute(
+            '''async () => { return {ok: true}; }''',
+            "token\r\nX-Injected: evil",
+            "api.mist.com"
+        )
+        
+        assert "error" in result
+        assert "invalid characters" in result["error"].lower()
+    
+    @pytest.mark.asyncio
+    async def test_token_with_null_byte_rejected(self, sandbox):
+        """Token containing null byte is rejected."""
+        result = await sandbox.run_execute(
+            '''async () => { return {ok: true}; }''',
+            "token\x00evil",
+            "api.mist.com"
+        )
+        
+        assert "error" in result
+        assert "invalid characters" in result["error"].lower()

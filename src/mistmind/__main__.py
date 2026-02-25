@@ -44,9 +44,13 @@ async def main(args: argparse.Namespace):
     
     setup_logging(config.mistmind_debug)
     
-    # Determine spec path (resolved spec should be in spec/ directory)
-    project_root = Path(__file__).parent.parent.parent
-    spec_path = project_root / "spec" / "mist.resolved.json"
+    # BUG 8 FIX: Use config spec path if set, otherwise fall back to project root detection
+    if config.mistmind_spec_path:
+        spec_path = Path(config.mistmind_spec_path)
+    else:
+        # Default: resolved spec in spec/ directory relative to project root
+        project_root = Path(__file__).parent.parent.parent
+        spec_path = project_root / "spec" / "mist.resolved.json"
     
     if not spec_path.exists():
         print(
