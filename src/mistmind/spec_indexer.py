@@ -175,37 +175,69 @@ def _group_into_themes(categories: dict[str, int]) -> dict[str, dict]:
     """Group categories into themes based on common patterns.
     
     Args:
-        categories: Dict of category names to counts
+        categories: Dict of category names to counts (e.g., "Orgs Devices", "Sites WLANs")
         
     Returns:
-        Dict of theme names to category dicts
+        Dict of theme names to category dicts (with scope prefixes stripped)
     """
+    import re
     themes = defaultdict(dict)
     
-    # Define theme keywords
-    theme_keywords = {
-        'Core': ['sites', 'devices', 'inventory', 'licenses', 'settings', 'setting'],
-        'Wireless': ['wlan', 'rf', 'wireless', 'ap', 'radio'],
-        'Security': ['nac', 'idp', 'secintel', 'antivirus', 'security', 'firewall'],
-        'Stats': ['stat', 'device', 'port', 'bgp', 'tunnel', 'metric'],
-        'Network': ['vpn', 'switch', 'gateway', 'routing', 'vlan', 'network'],
-        'Config': ['template', 'config', 'profile', 'policy'],
-        'Management': ['admin', 'user', 'webhook', 'alarm', 'event'],
+    def strip_scope_prefix(cat_name: str) -> str:
+        """Strip scope prefix from category name (e.g., 'Orgs Devices' -> 'Devices')."""
+        # Common scope prefixes
+        scope_prefixes = ['Orgs ', 'Sites ', 'MSPs ', 'Self ', 'Admins ', 'Installer ', 
+                         'Constants ', 'Utilities ']
+        for prefix in scope_prefixes:
+            if cat_name.startswith(prefix):
+                return cat_name[len(prefix):]
+        return cat_name
+    
+    def matches_theme(category: str, patterns: list[str]) -> bool:
+        """Check if category matches any pattern with word boundary awareness."""
+        cat_lower = category.lower()
+        for pattern in patterns:
+            # Exact word match or hyphen-separated match
+            if re.search(rf'\b{re.escape(pattern.lower())}\b', cat_lower):
+                return True
+            # Special case: "Stats -" prefix
+            if pattern == "Stats -" and cat_lower.startswith("stats -"):
+                return True
+        return False
+    
+    # Define theme patterns (word-boundary safe)
+    # Order matters: more specific patterns first to prevent misclassification
+    theme_patterns = {
+        'Wireless': ['WLAN', 'WLANs', 'RF Template', 'AP Template', 'RRM', 'Spectrum', 'Rogue', 
+                     'Beacon', 'Rfdiag', 'vBeacon', 'Wireless'],
+        'Monitoring': ['Alarm', 'Alarms', 'Event', 'Events', 'SLE', 'SLEs', 'Insight', 'Insights', 
+                       'Anomaly', 'Ticket', 'Webhook', 'Webhooks', 'Log'],
+        'Security': ['NAC', 'IDP', 'SecIntel', 'Antivirus', 'Security', 'Firewall', 'Anti Malware'],
+        'Stats': ['Stats -', 'Stats'],  # "Stats -" must come first
+        'Wired/Network': ['Network', 'Networks', 'VPN', 'EVPN', 'Gateway', 'Switch', 'Virtual Chassis'],
+        'Location': ['Map', 'Maps', 'Zone', 'Zones', 'Location', 'Asset', 'RSSI'],
+        'Clients': ['Clients'],
+        'Core': ['Sites', 'Devices', 'Inventory', 'Licenses', 'Setting', 'Settings'],
+        'Edge': ['MxEdge', 'MxTunnel', 'MxCluster'],
+        'Config': ['Template', 'Profile', 'Policy'],
     }
     
     # Classify categories
     for cat_name, count in categories.items():
-        cat_lower = cat_name.lower()
+        # Strip scope prefix for matching
+        category = strip_scope_prefix(cat_name)
         assigned = False
         
-        for theme, keywords in theme_keywords.items():
-            if any(kw in cat_lower for kw in keywords):
-                themes[theme][cat_name] = count
+        # Try to match against themes in order
+        for theme, patterns in theme_patterns.items():
+            if matches_theme(category, patterns):
+                # Store with stripped prefix
+                themes[theme][category] = count
                 assigned = True
                 break
         
         if not assigned:
-            themes['Other'][cat_name] = count
+            themes['Other'][category] = count
     
     # Remove empty themes
     return {k: v for k, v in themes.items() if v}
