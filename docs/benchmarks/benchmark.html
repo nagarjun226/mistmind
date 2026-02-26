@@ -37,12 +37,12 @@
 <div class="grid">
 
   <div class="card">
-    <h2>📊 Token Usage (6.1x savings)</h2>
+    <h2>📊 Token Usage (~5x savings)</h2>
     <img src="chart1_tokens.png" alt="Token comparison">
   </div>
 
   <div class="card">
-    <h2>🎯 API Coverage (3.7x more)</h2>
+    <h2>🎯 API Coverage (100% addressable)</h2>
     <img src="chart2_coverage.png" alt="Coverage comparison">
   </div>
 
@@ -73,21 +73,27 @@
       </tr>
       <tr>
         <td>Initial Tokens</td>
-        <td>8,113</td>
-        <td>1,324</td>
-        <td><span class="badge badge-green">MistMind (6.1x fewer)</span></td>
+        <td>~8,100+ (likely higher with enums/constraints)</td>
+        <td>1,531</td>
+        <td><span class="badge badge-green">MistMind (~5x fewer)</span></td>
       </tr>
       <tr>
         <td>API Coverage</td>
-        <td>271 endpoints (26.8%)</td>
-        <td>1,011 endpoints (100%)</td>
-        <td><span class="badge badge-green">MistMind (3.7x more)</span></td>
+        <td>271 SDK functions (26.8%)</td>
+        <td>1,011 endpoints addressable*</td>
+        <td><span class="badge badge-green">MistMind (broader reach)</span></td>
+      </tr>
+      <tr>
+        <td>Typed Parameters</td>
+        <td class="green">Yes (Pydantic validation)</td>
+        <td class="red">No (raw JS)</td>
+        <td><span class="badge badge-red">MistMCP (more reliable per-call)</span></td>
       </tr>
       <tr>
         <td>Round Trips</td>
         <td>1-2</td>
-        <td>2-3</td>
-        <td><span class="badge badge-yellow">MistMCP (1 fewer)</span></td>
+        <td>2-3 (but batches via Promise.all)</td>
+        <td><span class="badge badge-yellow">Depends on use case</span></td>
       </tr>
       <tr>
         <td>Maintenance</td>
@@ -103,8 +109,8 @@
       </tr>
       <tr>
         <td>Security Tests</td>
-        <td>Standard</td>
-        <td>233 tests (red team audits)</td>
+        <td>Standard (not published)</td>
+        <td>233 tests, 127 real Deno sandbox</td>
         <td><span class="badge badge-green">MistMind</span></td>
       </tr>
       <tr>
@@ -113,6 +119,16 @@
         <td>0 (reads from spec at runtime)</td>
         <td><span class="badge badge-green">MistMind</span></td>
       </tr>
+    </table>
+  </div>
+
+  <div class="card full-width" style="border-color: #d29922;">
+    <h2 style="color: #d29922;">⚖️ Honest Caveats</h2>
+    <table>
+      <tr><td>* <strong>addressable</strong> = LLM can reach any endpoint via JS, but must write correct code. No typed params or validation — the LLM can get it wrong.</td></tr>
+      <tr><td><strong>tmunzer advantages:</strong> Typed Pydantic parameters, domain-specific logic (derived configs, template resolution), lower latency for known endpoints (no search step).</td></tr>
+      <tr><td><strong>MistMind advantages:</strong> Lower token cost, broader coverage, works on any OpenAPI 3.x REST spec, auto-maintenance, Promise.all batching.</td></tr>
+      <tr><td><strong>Token estimates:</strong> tmunzer number is conservative (our regex parse). Real FastMCP payload includes enum values, JSON Schema constraints, defaults — likely 9,000-12,000 tokens.</td></tr>
     </table>
   </div>
 
