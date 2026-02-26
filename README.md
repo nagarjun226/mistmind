@@ -37,9 +37,9 @@ MistMind solves this with **progressive disclosure**:
 │  │  Spec Indexer   │  │  Deno Sandbox                    │ │
 │  │  • Analyzes     │  │  • --deny-net (search mode)      │ │
 │  │    OpenAPI      │  │  • --allow-net=api.mist.com      │ │
-│  │  • Generates    │  │  • Rate limiting                 │ │
-│  │    hierarchy    │  │  • Token scrubbing               │ │
-│  │  • ~800 tokens  │  │  • Timeout enforcement           │ │
+│  │  • Generates    │  │  • Rate limiting (30/min)        │ │
+│  │    hierarchy    │  │  • Token isolation (IIFE)        │ │
+│  │  • ~800 tokens  │  │  • Output scrubbing              │ │
 │  └─────────────────┘  └──────────────────────────────────┘ │
 └──────────────┬──────────────────────┬───────────────────────┘
                │                      │
@@ -50,7 +50,7 @@ MistMind solves this with **progressive disclosure**:
 
 ## How It Works
 
-### 1. **Index Generation** (Initialization)
+### 1. Index Generation (Initialization)
 ```python
 from mistmind.spec_indexer import generate_index_from_file
 
@@ -64,7 +64,7 @@ The indexer auto-detects:
 - **Pagination:** Detects `limit`, `page`, `start`, `end` params
 - **Response Patterns:** Array vs paginated vs single object
 
-### 2. **Search** (Discovery)
+### 2. Search (Discovery)
 LLM writes JavaScript to explore the spec:
 ```javascript
 async () => {
@@ -83,71 +83,50 @@ async () => {
 }
 ```
 
-Runs in hardened Deno sandbox:
-- **No network access** (only reads local spec file)
-- **30s timeout**
-- Returns discovered endpoints with full OpenAPI metadata
+Runs in hardened Deno sandbox with **no network access** — only reads the local spec file.
 
-### 3. **Execute** (Action)
+### 3. Execute (Action)
 LLM chains API calls:
 ```javascript
 async () => {
-  // Get current user context
   const self = await mist.request({path: '/api/v1/self'});
   const org_id = self.privileges[0].org_id;
   
-  // List devices in that org
   const devices = await mist.request({
-    path: `/api/v1/orgs/${org_id}/devices/search`,
-    params: {limit: 100}
+    path: `/api/v1/orgs/${org_id}/inventory`
   });
   
   return {
     org_id,
-    device_count: devices.results.length,
-    devices: devices.results.map(d => ({
-      name: d.name,
-      model: d.model,
-      status: d.status
-    }))
+    device_count: devices.length,
+    devices: devices.map(d => ({name: d.name, model: d.model, type: d.type}))
   };
 }
 ```
 
-Sandbox features:
-- **Network restricted to `api.mist.com`** (or configured host)
-- **Rate limiting:** 30 requests/min, max 5 concurrent
-- **API mode:** `readonly` (GET only) or `full` (GET/POST/PUT/DELETE/PATCH)
-- **Token scrubbing:** Removes API token from all error messages
-
 ## Quick Start
 
-### 1. Clone & Install
+### 1. Prerequisites
+- Python 3.11+
+- [Deno](https://deno.land/) runtime
+- Mist API token
+
+### 2. Install
 ```bash
-git clone https://github.com/your-org/mist-mcp.git
-cd mist-mcp
+git clone https://github.com/nagarjun226/mistmind.git
+cd mistmind
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -e .
 ```
 
-### 2. Configure
-Set environment variables:
+### 3. Configure
 ```bash
-export MIST_APITOKEN="your-mist-api-token"
-export MIST_HOST="api.mist.com"
-export MISTMIND_API_MODE="readonly"  # or "full"
+cp .env.example .env
+# Edit .env with your Mist API token
 ```
 
-Or create a `.env` file:
-```
-MIST_APITOKEN=your-mist-api-token
-MIST_HOST=api.mist.com
-MISTMIND_API_MODE=readonly
-```
-
-### 3. Add to Claude Desktop
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+### 4. Add to Claude Desktop
 ```json
 {
   "mcpServers": {
@@ -164,148 +143,84 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. You should see "MistMind" in the MCP servers list.
+See `claude_desktop_config.example.json` for a full example.
 
 ## Comparison: MistMind vs Traditional MCP
 
 | Aspect | Traditional MCP | MistMind |
 |--------|----------------|----------|
-| **Initial tokens** | ~5,000-20,000 (all endpoints) | ~800 (hierarchy only) |
-| **API coverage** | Partial (popular endpoints) | Complete (all 1,011 endpoints) |
+| **Initial tokens** | ~5,000-20,000 | ~800 |
+| **API coverage** | Partial (popular endpoints) | Complete (1,011 endpoints) |
 | **Round trips** | 1 (direct call) | 2-3 (search → execute) |
-| **Maintenance** | Manual (sync with API changes) | Auto (regenerates from spec) |
+| **Maintenance** | Manual sync with API | Auto-generates from spec |
 | **Private APIs** | Requires training data | Works with any OpenAPI spec |
-| **Discovery** | Pre-documented only | LLM explores full spec |
 
-**Key insight:** The 1-2 extra round trips are worth it for 10-25x token savings and complete API coverage.
+## Security
 
-## Security Model
+MistMind is built with defense-in-depth:
 
-### Deno Sandbox
-- **Isolated execution:** Each JS function runs in a fresh Deno process
-- **Principle of least privilege:**
-  - Search mode: `--deny-net` (no network)
-  - Execute mode: `--allow-net=api.mist.com` (only Mist API)
-- **Temp file permissions:** `0o600` (owner read/write only)
-- **Atomic file operations:** Prevents TOCTOU races
+- **Deno sandbox isolation** — Each execution is a fresh process
+- **IIFE token closure** — API token lives in closure scope, unreachable by user code
+- **stdin token passing** — Token never written to disk or source files
+- **Network allowlist** — Execute mode only reaches `api.mist.com`
+- **API mode enforcement** — `readonly` blocks all writes (server-side, not bypassable)
+- **Rate limiting** — 30 req/min, max 5 concurrent (configurable)
+- **Output scrubbing** — Token removed from all stdout/stderr/errors
+- **Temp file hardening** — `0o600` permissions, atomic writes
 
-### API Protection
-- **Rate limiting:** 30 req/min default (configurable)
-- **Concurrency limits:** Max 5 parallel requests
-- **Timeout enforcement:** 30s per execution
-- **Token scrubbing:** API token removed from all error messages
-- **API mode enforcement:** `readonly` blocks POST/PUT/DELETE/PATCH
+**191 security tests** including red team attack vectors: token exfiltration, sandbox escape, timing side-channels, DNS rebinding, Unicode normalization, regex DoS, and more. See `docs/security/` for audit reports.
 
-### Trust Model
-- **User code is untrusted:** LLM-generated JS runs in sandbox
-- **Spec file is trusted:** Read-only, local file
-- **API token is secret:** Never exposed in logs or errors
-- **Network access is restricted:** Explicit allow-list only
+## The "Private API" Proof
+
+The spec indexer has **zero Mist-specific knowledge**. It works on any OpenAPI 3.x spec.
+
+**Proof:** The obfuscation test (`tests/test_obfuscation.py`) renames all Mist-specific terms:
+- `orgs` → `entities`, `sites` → `locations`, `devices` → `nodes`
+
+MistMind still discovers and searches correctly. This proves it works on **private/unknown APIs without training data**.
 
 ## Configuration
 
-### Environment Variables
-
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `MIST_APITOKEN` | Mist API token | None | Yes |
-| `MIST_HOST` | Mist API host | `api.mist.com` | No |
-| `MISTMIND_API_MODE` | `readonly` or `full` | `readonly` | No |
-| `MISTMIND_RATE_LIMIT` | Requests per minute | `30` | No |
-| `MISTMIND_MAX_CONCURRENT` | Max parallel requests | `5` | No |
-| `MISTMIND_SPEC_PATH` | Custom spec path | `spec/mist.resolved.json` | No |
-
-### API Modes
-
-**`readonly` (recommended for exploration):**
-- Allows: `GET`, `HEAD`, `OPTIONS`
-- Blocks: `POST`, `PUT`, `DELETE`, `PATCH`
-- Use case: Exploring the API, dashboards, analytics
-
-**`full` (use with caution):**
-- Allows: All HTTP methods
-- Use case: Automation, configuration management
-- **Risk:** LLM can modify/delete resources
-
-## The "Private API" Story
-
-**Problem:** Most MCP servers only work on well-known APIs (GitHub, Jira, etc.) because they're trained on those APIs.
-
-**MistMind's approach:** Generic OpenAPI analysis. The spec_indexer has **zero Mist-specific knowledge**. It:
-1. Analyzes path prefixes to detect scopes
-2. Groups tags by common patterns
-3. Detects auth/pagination from structure
-4. Works on **any** OpenAPI 3.x spec
-
-**Proof:** The obfuscation test (`tests/test_obfuscation.py`) renames everything:
-- `orgs` → `entities`
-- `sites` → `locations`
-- `devices` → `nodes`
-- `wlans` → `wireless_networks`
-
-MistMind still discovers and searches the API correctly. This proves it works on **private/unknown APIs without training data**.
-
-### Using MistMind for Your API
-
-1. Get your OpenAPI spec (3.0 or 3.1)
-2. Resolve `$refs` with `python -m mistmind.spec_resolver`
-3. Update `MIST_HOST` and `MIST_APITOKEN` to your API
-4. Done! MistMind auto-generates the index
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MIST_APITOKEN` | Mist API token | (required) |
+| `MIST_HOST` | Mist API host | `api.mist.com` |
+| `MISTMIND_API_MODE` | `readonly` / `readwrite` / `all` | `readonly` |
+| `MISTMIND_RATE_LIMIT` | Requests per minute (0=unlimited) | `30` |
+| `MISTMIND_MAX_CONCURRENT` | Max parallel sandbox processes | `5` |
+| `MISTMIND_SPEC_PATH` | Custom OpenAPI spec path | `spec/mist.resolved.json` |
 
 ## Development
 
-### Run Tests
 ```bash
 source venv/bin/activate
-python -m pytest tests/ -v
+python -m pytest tests/ -v --cov     # Run tests with coverage
+ruff check src/ tests/               # Lint
+ruff format src/ tests/              # Format
 ```
 
-**Test coverage:**
-- `test_sandbox.py` — Deno sandbox security (43 tests)
-- `test_server.py` — MCP server handlers (25 tests)
-- `test_security.py` — Security hardening (8 tests)
-- `test_obfuscation.py` — Private API proof (8 tests)
+## Project Structure
 
-### Run Obfuscation Demo
-```bash
-python tests/test_obfuscation.py
-# Generates obfuscated spec, prints index, runs search queries
 ```
-
-### Code Style
-```bash
-ruff check src/ tests/
-ruff format src/ tests/
+mistmind/
+├── src/mistmind/          # Source code
+│   ├── __main__.py        # CLI entry point
+│   ├── config.py          # Pydantic settings
+│   ├── sandbox.py         # Deno sandbox (search + execute)
+│   ├── server.py          # MCP server handlers
+│   ├── spec_indexer.py    # OpenAPI → ~800 token index
+│   └── spec_resolver.py   # $ref resolver
+├── tests/                 # 191 tests (86% coverage)
+├── spec/                  # OpenAPI spec + resolver
+├── docs/                  # Architecture, benchmarks, security audits
+├── pyproject.toml
+└── README.md
 ```
-
-## Contributing
-
-We welcome contributions! Areas of interest:
-- **New OpenAPI patterns:** auth schemes, pagination styles, response formats
-- **Performance:** Faster spec parsing, caching strategies
-- **Security:** Additional sandbox hardening, threat modeling
-- **Integrations:** Support for AsyncAPI, GraphQL introspection
-
-Please:
-1. Fork the repo
-2. Create a feature branch (`git checkout -b feature/amazing-thing`)
-3. Write tests (we're at 61% coverage, aim for 80%+)
-4. Run tests (`pytest tests/ -v`)
-5. Submit a PR
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT
 
 ## Credits
 
-Built by the OpenClaw team. Inspired by:
-- **Code Mode MCP pattern** — Progressive disclosure for massive APIs
-- **Deno sandbox** — Secure JavaScript execution without Docker
-- **OpenAPI 3.1** — Machine-readable API specs
-
-## Support
-
-- **Issues:** [GitHub Issues](https://github.com/your-org/mist-mcp/issues)
-- **Discord:** [OpenClaw Community](https://discord.gg/openclaw)
-- **Email:** support@openclaw.io
+Built by [Nagarjun Srinivasan](https://github.com/nagarjun226). Inspired by the Code Mode MCP pattern for progressive API disclosure.
