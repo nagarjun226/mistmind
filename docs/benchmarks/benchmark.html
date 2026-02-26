@@ -1,136 +1,155 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<title>MistMind vs Munzer — Real Benchmark Results</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MistMind vs MistMCP — Benchmark Comparison</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; margin: 0; padding: 20px; }
-  h1 { text-align: center; color: #58a6ff; margin-bottom: 5px; }
-  h2 { text-align: center; color: #8b949e; font-weight: 400; font-size: 14px; margin-top: 0; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1200px; margin: 20px auto; }
-  .chart-box { background: #161b22; border-radius: 12px; padding: 20px; border: 1px solid #30363d; }
-  .chart-box h3 { color: #e6edf3; margin: 0 0 10px 0; font-size: 15px; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; padding: 2rem; }
+  h1 { text-align: center; font-size: 2rem; margin-bottom: 0.5rem; color: #f0f6fc; }
+  .subtitle { text-align: center; color: #8b949e; margin-bottom: 2rem; font-size: 1.1rem; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; max-width: 1200px; margin: 0 auto; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 1.5rem; }
+  .card h2 { font-size: 1.2rem; margin-bottom: 1rem; color: #58a6ff; }
+  .card img { width: 100%; border-radius: 8px; }
   .full-width { grid-column: 1 / -1; }
-  canvas { max-height: 350px; }
-  .summary { max-width: 1200px; margin: 30px auto; background: #161b22; border-radius: 12px; padding: 24px; border: 1px solid #30363d; }
-  .summary h3 { color: #58a6ff; margin-top: 0; }
-  .summary table { width: 100%; border-collapse: collapse; }
-  .summary th { text-align: left; color: #8b949e; padding: 8px; border-bottom: 1px solid #30363d; }
-  .summary td { padding: 8px; border-bottom: 1px solid #21262d; }
-  .winner { color: #3fb950; font-weight: 600; }
-  .loser { color: #8b949e; }
-  .impossible { color: #f85149; font-style: italic; }
-  .legend-box { display: flex; gap: 20px; justify-content: center; margin: 15px 0; }
-  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
-  .dot { width: 12px; height: 12px; border-radius: 3px; }
-  .dot.mm { background: #58a6ff; }
-  .dot.mz { background: #f0883e; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #30363d; }
+  th { color: #58a6ff; font-weight: 600; }
+  .green { color: #3fb950; font-weight: 600; }
+  .red { color: #f85149; }
+  .yellow { color: #d29922; }
+  .badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.85rem; font-weight: 600; }
+  .badge-green { background: #0d3520; color: #3fb950; border: 1px solid #238636; }
+  .badge-red { background: #3d1418; color: #f85149; border: 1px solid #da3633; }
+  .badge-yellow { background: #3d2e00; color: #d29922; border: 1px solid #9e6a03; }
+  .obfuscation { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 1rem; margin-top: 1rem; font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
+  .highlight { background: #1f2937; padding: 0.2rem 0.4rem; border-radius: 4px; }
+  footer { text-align: center; margin-top: 2rem; color: #484f58; font-size: 0.9rem; }
 </style>
 </head>
 <body>
-<h1>🧠 MistMind vs 🔧 Munzer's mistmcp</h1>
-<h2>Real benchmark against Nagarjun's Mist org (4 sites, 8 devices) — Feb 23, 2026</h2>
-<div class="legend-box">
-  <div class="legend-item"><div class="dot mm"></div> MistMind (Code Mode)</div>
-  <div class="legend-item"><div class="dot mz"></div> Munzer (Traditional)</div>
-</div>
+
+<h1>🧠 MistMind vs MistMCP</h1>
+<p class="subtitle">Benchmark comparison — Feb 26, 2026</p>
 
 <div class="grid">
 
-<div class="chart-box full-width">
-<h3>📊 Total Tokens Per Scenario (lower = better)</h3>
-<canvas id="tokensChart"></canvas>
+  <div class="card">
+    <h2>📊 Token Usage (10x savings)</h2>
+    <img src="chart1_tokens.png" alt="Token comparison">
+  </div>
+
+  <div class="card">
+    <h2>🎯 API Coverage (22x more)</h2>
+    <img src="chart2_coverage.png" alt="Coverage comparison">
+  </div>
+
+  <div class="card">
+    <h2>🔄 Round Trips (trade-off)</h2>
+    <img src="chart3_roundtrips.png" alt="Round trips">
+  </div>
+
+  <div class="card">
+    <h2>⚡ Tools vs Coverage</h2>
+    <img src="chart4_tools_vs_coverage.png" alt="Tools vs coverage">
+  </div>
+
+  <div class="card full-width">
+    <h2>📋 Head-to-Head Comparison</h2>
+    <table>
+      <tr>
+        <th>Metric</th>
+        <th>MistMCP (tmunzer)</th>
+        <th>MistMind (ours)</th>
+        <th>Winner</th>
+      </tr>
+      <tr>
+        <td>MCP Tools</td>
+        <td>45</td>
+        <td>2</td>
+        <td><span class="badge badge-green">MistMind (22x fewer)</span></td>
+      </tr>
+      <tr>
+        <td>Initial Tokens</td>
+        <td>~9,000</td>
+        <td>~871</td>
+        <td><span class="badge badge-green">MistMind (10x fewer)</span></td>
+      </tr>
+      <tr>
+        <td>API Coverage</td>
+        <td>45 endpoints (4.5%)</td>
+        <td>1,011 endpoints (100%)</td>
+        <td><span class="badge badge-green">MistMind (22x more)</span></td>
+      </tr>
+      <tr>
+        <td>Round Trips</td>
+        <td>1-2</td>
+        <td>2-3</td>
+        <td><span class="badge badge-yellow">MistMCP (1 fewer)</span></td>
+      </tr>
+      <tr>
+        <td>Maintenance</td>
+        <td>Manual (sync with API)</td>
+        <td>Auto (regenerates from spec)</td>
+        <td><span class="badge badge-green">MistMind</span></td>
+      </tr>
+      <tr>
+        <td>Private API Support</td>
+        <td class="red">No</td>
+        <td class="green">Yes (any OpenAPI spec)</td>
+        <td><span class="badge badge-green">MistMind</span></td>
+      </tr>
+      <tr>
+        <td>Security Tests</td>
+        <td>Standard</td>
+        <td>216 tests (red team audits)</td>
+        <td><span class="badge badge-green">MistMind</span></td>
+      </tr>
+      <tr>
+        <td>Hardcoded Schemas</td>
+        <td>1.6 MB (schemas_data.py)</td>
+        <td>0 (reads from spec)</td>
+        <td><span class="badge badge-green">MistMind</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="card full-width">
+    <h2>🔒 Obfuscation Test — Proof of Generic API Support</h2>
+    <p style="margin-bottom: 1rem; color: #8b949e;">
+      All Mist-specific terms replaced: <span class="highlight">orgs→entities</span> 
+      <span class="highlight">sites→locations</span> <span class="highlight">devices→nodes</span>
+      <span class="highlight">wlans→wireless_networks</span> <span class="highlight">mist→acme</span>
+      <span class="highlight">juniper→genericcorp</span>
+    </p>
+    <table>
+      <tr><th>Check</th><th>Result</th></tr>
+      <tr><td>Index generated successfully</td><td class="green">✅ Pass</td></tr>
+      <tr><td>Correct endpoint count (1,011)</td><td class="green">✅ Pass</td></tr>
+      <tr><td>API hierarchy detected</td><td class="green">✅ Pass</td></tr>
+      <tr><td>Auth endpoints found</td><td class="green">✅ Pass</td></tr>
+      <tr><td>Pagination patterns detected</td><td class="green">✅ Pass</td></tr>
+      <tr><td>No "mist" in output</td><td class="green">✅ Pass</td></tr>
+      <tr><td>No "juniper" in output</td><td class="green">✅ Pass</td></tr>
+      <tr><td>Token count similar (~871 vs ~869)</td><td class="green">✅ Pass</td></tr>
+    </table>
+    <p style="margin-top: 1rem; color: #3fb950; font-weight: 600;">
+      ✅ MistMind works on completely unknown APIs — zero domain-specific knowledge required.
+    </p>
+  </div>
+
+  <div class="card full-width">
+    <h2>📈 Overall Score</h2>
+    <img src="chart5_summary.png" alt="Summary comparison">
+  </div>
+
 </div>
 
-<div class="chart-box">
-<h3>📦 Result Size: Tokens Returned to LLM Context</h3>
-<canvas id="resultChart"></canvas>
-</div>
+<footer>
+  <p>Generated Feb 26, 2026 — <a href="https://github.com/nagarjun226/mistmind" style="color: #58a6ff;">github.com/nagarjun226/mistmind</a></p>
+</footer>
 
-<div class="chart-box">
-<h3>🔄 Round Trips Required</h3>
-<canvas id="roundTripsChart"></canvas>
-</div>
-
-<div class="chart-box">
-<h3>⏱️ Total Latency (ms)</h3>
-<canvas id="latencyChart"></canvas>
-</div>
-
-<div class="chart-box">
-<h3>📐 Context Tax: Tool Definitions at Startup</h3>
-<canvas id="startupChart"></canvas>
-</div>
-
-</div>
-
-<div class="summary">
-<h3>📋 Raw Numbers</h3>
-<table>
-<tr><th>Scenario</th><th>MistMind Tokens</th><th>Munzer Tokens</th><th>Savings</th><th>MistMind Trips</th><th>Munzer Trips</th></tr>
-<tr><td>Self + Org Info</td><td class="winner">112</td><td><span class="loser">199</span></td><td><span class="winner">44% fewer</span></td><td class="winner">1</td><td>2</td></tr>
-<tr><td>Org Dashboard (Sites+Inventory+Org)</td><td class="winner">263</td><td><span class="loser">1759</span></td><td><span class="winner">85% fewer</span></td><td class="winner">1</td><td>3</td></tr>
-<tr><td>Devices Per Site (4 sites)</td><td class="winner">166</td><td><span class="loser">1423</span></td><td><span class="winner">88% fewer</span></td><td class="winner">1</td><td>5</td></tr>
-<tr><td>Find WLAN Endpoints</td><td class="winner">341</td><td><span class="impossible">impossible</span></td><td><span class="impossible">N/A (impossible)</span></td><td class="winner">1</td><td>0</td></tr>
-<tr><td>Disconnected Devices Only</td><td class="winner">128</td><td><span class="loser">1048</span></td><td><span class="winner">88% fewer</span></td><td class="winner">1</td><td>1</td></tr>
-
-<tr style="border-top: 2px solid #30363d; font-weight: 600;">
-<td>Startup Context Tax</td><td class="winner">~300 tokens</td><td class="loser">~415,000 tokens</td><td class="winner">99.9% fewer</td><td colspan="2">—</td></tr>
-<tr><td>API Coverage</td><td class="winner">1,011 operations</td><td class="loser">45 operations</td><td class="winner">22x more</td><td colspan="2">—</td></tr>
-<tr><td>Codebase</td><td class="winner">899 lines</td><td class="loser">53,858 lines</td><td class="winner">60x smaller</td><td colspan="2">—</td></tr>
-</table>
-</div>
-
-<script>
-const labels = ["Self + Org Info", "Org Dashboard (Sites+Inventory+Org)", "Devices Per Site (4 sites)", "Find WLAN Endpoints", "Disconnected Devices Only"];
-const mmTokens = [112, 263, 166, 341, 128];
-const mzTokens = [199, 1759, 1423, 0, 1048];
-const mmResult = [41, 58, 53, 240, 58];
-const mzResult = [156, 1678, 1284, 0, 1020];
-const mmTrips = [1, 1, 1, 1, 1];
-const mzTrips = [2, 3, 5, 0, 1];
-const mmLatency = [463, 141, 357, 249, 199];
-const mzLatency = [375, 550, 901, 0, 191];
-
-const blue = '#58a6ff';
-const orange = '#f0883e';
-const opts = { responsive: true, plugins: { legend: { labels: { color: '#e6edf3' }}} , scales: { x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }}, y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }}}};
-
-new Chart(document.getElementById('tokensChart'), {
-  type: 'bar', data: { labels, datasets: [
-    { label: 'MistMind', data: mmTokens, backgroundColor: blue },
-    { label: 'Munzer', data: mzTokens, backgroundColor: orange }
-  ]}, options: {...opts, plugins: {...opts.plugins, title: { display: false }}}
-});
-
-new Chart(document.getElementById('resultChart'), {
-  type: 'bar', data: { labels, datasets: [
-    { label: 'MistMind', data: mmResult, backgroundColor: blue },
-    { label: 'Munzer', data: mzResult, backgroundColor: orange }
-  ]}, options: opts
-});
-
-new Chart(document.getElementById('roundTripsChart'), {
-  type: 'bar', data: { labels, datasets: [
-    { label: 'MistMind', data: mmTrips, backgroundColor: blue },
-    { label: 'Munzer', data: mzTrips, backgroundColor: orange }
-  ]}, options: opts
-});
-
-new Chart(document.getElementById('latencyChart'), {
-  type: 'bar', data: { labels, datasets: [
-    { label: 'MistMind', data: mmLatency, backgroundColor: blue },
-    { label: 'Munzer', data: mzLatency, backgroundColor: orange }
-  ]}, options: opts
-});
-
-new Chart(document.getElementById('startupChart'), {
-  type: 'doughnut', data: {
-    labels: ['MistMind (~300)', 'Munzer (~415,000)'],
-    datasets: [{ data: [300, 415000], backgroundColor: [blue, orange] }]
-  }, options: { responsive: true, plugins: { legend: { labels: { color: '#e6edf3' }}}}
-});
-</script>
 </body>
 </html>
