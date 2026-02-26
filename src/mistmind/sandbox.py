@@ -186,8 +186,16 @@ class DenoSandbox:
             tmp.flush()
         
         try:
-            # Build Deno command with --no-prompt to prevent interactive prompts
-            cmd = [self.deno_path, "run", "--no-prompt"] + args + [tmp_path]
+            # Build Deno command with security flags:
+            # --no-prompt: prevent interactive prompts
+            # --v8-flags=--max-old-space-size=256: limit heap to 256MB (prevents memory exhaustion attacks)
+            # Note: Dynamic imports are still possible but token remains in IIFE closure
+            cmd = [
+                self.deno_path,
+                "run",
+                "--no-prompt",
+                "--v8-flags=--max-old-space-size=256",
+            ] + args + [tmp_path]
             
             logger.debug(f"Running Deno: {' '.join(cmd)}")
             
