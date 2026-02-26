@@ -61,7 +61,7 @@
     <table>
       <tr>
         <th>Metric</th>
-        <th>MistMCP (tmunzer)</th>
+        <th>MistMCP (MistMCP)</th>
         <th>MistMind (ours)</th>
         <th>Winner</th>
       </tr>
@@ -126,9 +126,9 @@
     <h2 style="color: #d29922;">⚖️ Honest Caveats</h2>
     <table>
       <tr><td>* <strong>addressable</strong> = LLM can reach any endpoint via JS, but must write correct code. No typed params or validation — the LLM can get it wrong.</td></tr>
-      <tr><td><strong>tmunzer advantages:</strong> Typed Pydantic parameters, domain-specific logic (derived configs, template resolution), lower latency for known endpoints (no search step).</td></tr>
+      <tr><td><strong>MistMCP advantages:</strong> Typed Pydantic parameters, domain-specific logic (derived configs, template resolution), lower latency for known endpoints (no search step).</td></tr>
       <tr><td><strong>MistMind advantages:</strong> Lower token cost, broader coverage, works on any OpenAPI 3.x REST spec, auto-maintenance, Promise.all batching.</td></tr>
-      <tr><td><strong>Token estimates:</strong> tmunzer number is conservative (our regex parse). Real FastMCP payload includes enum values, JSON Schema constraints, defaults — likely 9,000-12,000 tokens.</td></tr>
+      <tr><td><strong>Token estimates:</strong> MistMCP number is conservative (our regex parse). Real FastMCP payload includes enum values, JSON Schema constraints, defaults — likely 9,000-12,000 tokens.</td></tr>
     </table>
   </div>
 

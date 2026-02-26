@@ -2,7 +2,7 @@
 
 ## Why We Can Do Better
 
-### Reference Analysis (tmunzer/mistmcp)
+### Reference Analysis (the reference MistMCP implementation)
 - **40 tools** covering ~60-70 of 1011 API operations (~6% coverage)
 - Auto-generated from OpenAPI spec — tool descriptions are API docs, not LLM-friendly
 - Depends on `mistapi` Python SDK (heavy, opaque)
