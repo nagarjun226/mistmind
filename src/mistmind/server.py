@@ -29,6 +29,7 @@ class MistMindServer:
             api_mode=config.mistmind_api_mode,
             rate_limit=config.mistmind_rate_limit,
             max_concurrent=config.mistmind_max_concurrent,
+            obfuscated=getattr(config, "mistmind_obfuscate_api", False),
         )
         self.server = Server("mistmind")
         
@@ -40,9 +41,21 @@ class MistMindServer:
                 f"spec/mist.openapi.json spec/mist.resolved.json"
             )
         
+        # Apply runtime obfuscation if configured
+        self.obfuscated = getattr(self.config, "mistmind_obfuscate_api", False)
+        if self.obfuscated:
+            logger.warning(
+                "⚠️  Runtime API Obfuscation ENABLED — "
+                "the LLM will see fictional resource names."
+            )
+            from .obfuscator import obfuscate_spec_file
+            self.spec_path = obfuscate_spec_file(self.spec_path)
+        
         # Generate dynamic index from spec
         logger.info("Generating spec index...")
-        self.spec_index = generate_index_from_file(str(self.spec_path))
+        self.spec_index = generate_index_from_file(
+            str(self.spec_path), force_search_first=self.obfuscated
+        )
         logger.info(f"Spec index generated (~{len(self.spec_index) // 4} tokens)")
         
         self._register_handlers()
@@ -53,6 +66,55 @@ class MistMindServer:
         @self.server.list_tools()
         async def list_tools() -> list[Tool]:
             """List available tools."""
+            # Adapt descriptions based on obfuscation mode
+            if self.obfuscated:
+                search_desc = (
+                    "JavaScript async arrow function to search the OpenAPI spec. "
+                    "Example: async () => { const results = []; for (const [path, methods] "
+                    "of Object.entries(spec.paths)) { for (const [method, op] of "
+                    "Object.entries(methods)) { if (op.tags?.some(t => "
+                    't.toLowerCase().includes("wireless"))) results.push({method: '
+                    "method.toUpperCase(), path, summary: op.summary}); } } return results; }"
+                )
+                execute_desc = (
+                    "Execute JS against the API. Use mist.request({method, path, body, params}).\n"
+                    "IMPORTANT: You MUST use the `search` tool first to find exact paths and "
+                    "parameters — your pre-trained knowledge of this API will not apply.\n"
+                    "method defaults to GET. Chain multiple calls, filter/transform results in JS.\n"
+                    "mist.allowedMethods shows permitted HTTP methods.\n"
+                    "For paginated results: check if total > results.length, loop with page/start params."
+                )
+                execute_example = (
+                    "JavaScript async arrow function to execute. "
+                    'Example: async () => { const me = await mist.request({path: "/api/v1/current_user"}); '
+                    "const entity_id = me.privileges[0].entity_id; const locations = await "
+                    "mist.request({path: `/api/v1/entities/${entity_id}/locations`}); return "
+                    "{entity_id, locations: locations.map(l => ({name: l.name, id: l.id}))}; }"
+                )
+            else:
+                search_desc = (
+                    "JavaScript async arrow function to search the OpenAPI spec. "
+                    "Example: async () => { const results = []; for (const [path, methods] "
+                    "of Object.entries(spec.paths)) { for (const [method, op] of "
+                    "Object.entries(methods)) { if (op.tags?.some(t => "
+                    't.toLowerCase().includes("wireless"))) results.push({method: '
+                    "method.toUpperCase(), path, summary: op.summary}); } } return results; }"
+                )
+                execute_desc = (
+                    "Execute JS against the Mist API. Use mist.request({method, path, body, params}).\n"
+                    "method defaults to GET. Chain multiple calls, filter/transform results in JS.\n"
+                    "mist.allowedMethods shows permitted HTTP methods.\n"
+                    "For paginated results: check if total > results.length, loop with page/start params.\n"
+                    "For write ops: return a preview first, execute write only after user confirms."
+                )
+                execute_example = (
+                    "JavaScript async arrow function to execute. "
+                    'Example: async () => { const self = await mist.request({path: "/api/v1/self"}); '
+                    "const org_id = self.privileges[0].org_id; const sites = await "
+                    "mist.request({path: `/api/v1/orgs/${org_id}/sites/search`}); return "
+                    "{org_id, sites: sites.results?.map(s => ({name: s.name, id: s.id}))}; }"
+                )
+
             return [
                 Tool(
                     name="search",
@@ -62,14 +124,7 @@ class MistMindServer:
                         "properties": {
                             "code": {
                                 "type": "string",
-                                "description": (
-                                    "JavaScript async arrow function to search the OpenAPI spec. "
-                                    "Example: async () => { const results = []; for (const [path, methods] "
-                                    "of Object.entries(spec.paths)) { for (const [method, op] of "
-                                    "Object.entries(methods)) { if (op.tags?.some(t => "
-                                    't.toLowerCase().includes("wireless"))) results.push({method: '
-                                    "method.toUpperCase(), path, summary: op.summary}); } } return results; }"
-                                ),
+                                "description": search_desc,
                             }
                         },
                         "required": ["code"],
@@ -77,25 +132,13 @@ class MistMindServer:
                 ),
                 Tool(
                     name="execute",
-                    description=(
-                        "Execute JS against the Mist API. Use mist.request({method, path, body, params}).\n"
-                        "method defaults to GET. Chain multiple calls, filter/transform results in JS.\n"
-                        "mist.allowedMethods shows permitted HTTP methods.\n"
-                        "For paginated results: check if total > results.length, loop with page/start params.\n"
-                        "For write ops: return a preview first, execute write only after user confirms."
-                    ),
+                    description=execute_desc,
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "code": {
                                 "type": "string",
-                                "description": (
-                                    "JavaScript async arrow function to execute. "
-                                    'Example: async () => { const self = await mist.request({path: "/api/v1/self"}); '
-                                    "const org_id = self.privileges[0].org_id; const sites = await "
-                                    "mist.request({path: `/api/v1/orgs/${org_id}/sites/search`}); return "
-                                    "{org_id, sites: sites.results?.map(s => ({name: s.name, id: s.id}))}; }"
-                                ),
+                                "description": execute_example,
                             }
                         },
                         "required": ["code"],

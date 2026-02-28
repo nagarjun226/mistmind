@@ -11,11 +11,14 @@ from pathlib import Path
 from typing import Any
 
 
-def generate_index(spec: dict) -> str:
+def generate_index(spec: dict, force_search_first: bool = False) -> str:
     """Generate a structured index/description from an OpenAPI spec.
     
     Args:
         spec: OpenAPI 3.x specification dict (with or without resolved $refs)
+        force_search_first: If True, add stronger "search before execute"
+            instructions (used in obfuscation mode where the LLM's pre-trained
+            API knowledge is intentionally invalidated).
         
     Returns:
         Formatted text description suitable for LLM tool descriptions
@@ -86,24 +89,35 @@ def generate_index(spec: dict) -> str:
         "• spec.components.schemas → data models",
         "• Common: operationId naming patterns (e.g., listOrgDevices, searchSiteClients)",
         "",
-        "ALWAYS search to discover exact paths and parameters before executing.",
     ])
+
+    if force_search_first:
+        lines.extend([
+            "CRITICAL INSTRUCTIONS:",
+            "1. You DO NOT KNOW the exact paths, parameters, or endpoints for this API.",
+            "2. You MUST use the `search` tool to explore the spec before EVERY `execute` call.",
+            "3. NEVER guess or assume an endpoint exists without searching first.",
+            "4. Start broad: search for keywords in `tags` or `summary`, then drill down.",
+        ])
+    else:
+        lines.append("ALWAYS search to discover exact paths and parameters before executing.")
     
     return "\n".join(lines)
 
 
-def generate_index_from_file(spec_path: str) -> str:
+def generate_index_from_file(spec_path: str, force_search_first: bool = False) -> str:
     """Generate index from an OpenAPI spec file.
     
     Args:
         spec_path: Path to OpenAPI JSON file
+        force_search_first: Passed through to :func:`generate_index`.
         
     Returns:
         Formatted text description
     """
     with open(spec_path, 'r') as f:
         spec = json.load(f)
-    return generate_index(spec)
+    return generate_index(spec, force_search_first=force_search_first)
 
 
 def _count_operations(spec: dict) -> int:

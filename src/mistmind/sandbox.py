@@ -66,6 +66,7 @@ class DenoSandbox:
     # All Mist API hosts that should be allowed for execute
     MIST_HOSTS = [
         "api.mist.com",
+        "api.mistsys.com",
         "api.eu.mist.com",
         "api.gc1.mist.com",
         "api.gc2.mist.com",
@@ -86,6 +87,7 @@ class DenoSandbox:
         api_mode: str = "readonly",
         rate_limit: int = 30,
         max_concurrent: int = 5,
+        obfuscated: bool = False,
     ):
         """Initialize sandbox with path to Deno binary and security settings.
         
@@ -95,6 +97,8 @@ class DenoSandbox:
             api_mode: "readonly" (GET), "readwrite" (GET+POST+PUT+PATCH), "all" (includes DELETE)
             rate_limit: Max executions per minute (0 = unlimited)
             max_concurrent: Max parallel Deno processes
+            obfuscated: If True, inject de-obfuscation mapping so obfuscated
+                paths are translated back to real API paths before fetch.
         """
         self.deno_path = deno_path
         self.timeout = timeout
@@ -102,6 +106,7 @@ class DenoSandbox:
         self.allowed_methods = API_MODE_METHODS.get(api_mode, API_MODE_METHODS["readonly"])
         self.rate_limit = rate_limit
         self.max_concurrent = max_concurrent
+        self.obfuscated = obfuscated
         
         # Rate limiting state
         self._request_times: deque = deque()
@@ -117,7 +122,15 @@ class DenoSandbox:
             raise ValueError(f"Invalid api_mode: {api_mode}. Must be one of: {list(API_MODE_METHODS.keys())}")
         
         logger.info(f"Sandbox initialized: api_mode={api_mode}, methods={self.allowed_methods}, "
-                     f"rate_limit={rate_limit}/min, max_concurrent={max_concurrent}")
+                     f"rate_limit={rate_limit}/min, max_concurrent={max_concurrent}, "
+                     f"obfuscated={obfuscated}")
+
+    def _deobfuscation_js(self) -> str:
+        """Return JS snippet to de-obfuscate paths, or empty string if not obfuscated."""
+        if not self.obfuscated:
+            return ""
+        from .obfuscator import generate_deobfuscation_js
+        return generate_deobfuscation_js()
     
     def _check_rate_limit(self) -> Optional[str]:
         """Check if rate limit is exceeded. Returns error message or None."""
@@ -417,6 +430,7 @@ const mist = await (async () => {{
         );
       }}
       
+{self._deobfuscation_js()}
       const url = new URL(`https://${{_host}}${{path}}`);
       
       if (params) {{
