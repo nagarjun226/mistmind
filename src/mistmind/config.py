@@ -54,6 +54,13 @@ class ServerConfig(BaseSettings):
         default=None,
         description="Path to resolved OpenAPI spec JSON file",
     )
+    # Runtime obfuscation: renames all Mist-specific terms in the spec so the
+    # LLM has zero pre-trained knowledge of the API.  Proves code mode works
+    # with any OpenAPI spec, not just ones the LLM was trained on.
+    mistmind_obfuscate_api: bool = Field(
+        default=False,
+        description="Obfuscate API spec at runtime for zero-knowledge testing",
+    )
 
     def __init__(self, **kwargs):
         """Initialize config and auto-detect Deno path if not provided."""
